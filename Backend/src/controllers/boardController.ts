@@ -156,7 +156,7 @@ export async function updateBoard(req: AuthenticatedRequest, res: Response): Pro
   }
 
   // Concurrency check
-  if (data.expectedVersion !== undefined && board.version !== data.expectedVersion) {
+  if (data.expectedVersion === undefined || board.version !== data.expectedVersion) {
     res.status(409).json({
       code: 'version_conflict',
       message: 'Board was modified by another user. Please reload.',

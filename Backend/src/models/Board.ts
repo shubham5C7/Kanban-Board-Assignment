@@ -18,7 +18,7 @@ const BoardSchema = new Schema<IBoard>(
     version: { type: Number, default: 1, required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
 
 // Leading tenantId compound index for strict isolation

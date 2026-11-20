@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { TenantEvent } from '../models/TenantEvent';
+import { Tenant } from '../models/Tenant';
 import { getSocketIO } from './realtime';
 
 export async function recordTenantEvent(
@@ -10,13 +11,30 @@ export async function recordTenantEvent(
 ): Promise<number> {
   const tenantObjectId = new mongoose.Types.ObjectId(tenantId.toString());
 
-  // Atomically find max sequence for tenant
-  const lastEvent = await TenantEvent.findOne({ tenantId: tenantObjectId })
+  // Repair the counter floor from the indexed event stream. This also migrates
+  // tenants whose eventSeq field predates the counter, while keeping concurrent
+  // allocations atomic on the tenant document.
+  const latestEvent = await TenantEvent.findOne({ tenantId: tenantObjectId })
     .sort({ seq: -1 })
     .select('seq')
     .lean();
-
-  const nextSeq = (lastEvent?.seq ?? 0) + 1;
+  const eventFloor = latestEvent?.seq ?? 0;
+  const tenant = await Tenant.findOneAndUpdate(
+    { _id: tenantObjectId },
+    [{
+      $set: {
+        eventSeq: {
+          $add: [
+            { $max: [{ $ifNull: ['$eventSeq', 0] }, eventFloor] },
+            1,
+          ],
+        },
+      },
+    }],
+    { new: true, projection: { eventSeq: 1 } }
+  ).lean();
+  if (!tenant) throw new Error('Tenant not found while recording event');
+  const nextSeq = tenant.eventSeq;
 
   const eventDoc = await TenantEvent.create({
     tenantId: tenantObjectId,

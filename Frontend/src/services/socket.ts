@@ -3,15 +3,16 @@ import { PresenceUser } from '../types';
 
 let socket: Socket | null = null;
 let heartbeatInterval: any = null;
+let activeTenant: { tenantId: string; boardId?: string; lastSeq?: number } | null = null;
 
 export type ConnectionStatus = 'connected' | 'reconnecting' | 'disconnected';
 
 export interface SocketCallbacks {
   onStatusChange?: (status: ConnectionStatus) => void;
   onPresenceUpdate?: (users: PresenceUser[]) => void;
-  onTaskEvent?: (event: { type: string; data: any; actorId: string }) => void;
-  onColumnEvent?: (event: { type: string; data: any; actorId: string }) => void;
-  onBoardEvent?: (event: { type: string; data: any; actorId: string }) => void;
+  onTaskEvent?: (event: { type: string; data: any; actorId: string; seq?: number }) => void;
+  onColumnEvent?: (event: { type: string; data: any; actorId: string; seq?: number }) => void;
+  onBoardEvent?: (event: { type: string; data: any; actorId: string; seq?: number }) => void;
   onReplayEvents?: (events: any[]) => void;
 }
 
@@ -22,7 +23,8 @@ export function connectSocket(token: string, callbacks: SocketCallbacks = {}): S
     socket = null;
   }
 
-  socket = io('http://localhost:5000', {
+  const socketUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  socket = io(socketUrl, {
     auth: { token },
     reconnection: true,
     reconnectionAttempts: 10,
@@ -31,6 +33,7 @@ export function connectSocket(token: string, callbacks: SocketCallbacks = {}): S
   });
 
   socket.on('connect', () => {
+    if (activeTenant) socket?.emit('join', activeTenant);
     callbacks.onStatusChange?.('connected');
   });
 
@@ -53,21 +56,21 @@ export function connectSocket(token: string, callbacks: SocketCallbacks = {}): S
   // Task events
   ['task.created', 'task.updated', 'task.moved', 'task.deleted'].forEach(evt => {
     socket?.on(evt, payload => {
-      callbacks.onTaskEvent?.({ type: evt, data: payload.data, actorId: payload.actorId });
+      callbacks.onTaskEvent?.({ type: evt, data: payload.data, actorId: payload.actorId, seq: payload.seq });
     });
   });
 
   // Column events
   ['column.created', 'column.updated', 'column.moved', 'column.deleted'].forEach(evt => {
     socket?.on(evt, payload => {
-      callbacks.onColumnEvent?.({ type: evt, data: payload.data, actorId: payload.actorId });
+      callbacks.onColumnEvent?.({ type: evt, data: payload.data, actorId: payload.actorId, seq: payload.seq });
     });
   });
 
   // Board events
   ['board.created', 'board.updated', 'board.deleted'].forEach(evt => {
     socket?.on(evt, payload => {
-      callbacks.onBoardEvent?.({ type: evt, data: payload.data, actorId: payload.actorId });
+      callbacks.onBoardEvent?.({ type: evt, data: payload.data, actorId: payload.actorId, seq: payload.seq });
     });
   });
 
@@ -80,6 +83,7 @@ export function connectSocket(token: string, callbacks: SocketCallbacks = {}): S
 
 export function joinTenantRoom(tenantId: string, boardId?: string, lastSeq?: number) {
   if (!socket) return;
+  activeTenant = { tenantId, boardId, lastSeq };
   socket.emit('join', { tenantId, boardId, lastSeq });
 
   // Clear previous heartbeat if any
@@ -95,6 +99,7 @@ export function joinTenantRoom(tenantId: string, boardId?: string, lastSeq?: num
 export function leaveTenantRoom(tenantId: string) {
   if (!socket) return;
   socket.emit('leave', { tenantId });
+  if (activeTenant?.tenantId === tenantId) activeTenant = null;
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;

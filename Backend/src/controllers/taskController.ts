@@ -44,6 +44,10 @@ const UndoTaskSchema = z.object({
     title: z.string().optional(),
     description: z.string().optional(),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
+    labels: z.array(z.string()).optional(),
+    dueDate: z.string().datetime().nullable().optional(),
+    assigneeId: z.string().nullable().optional(),
+    deletedAt: z.string().datetime().nullable().optional(),
   }),
 });
 
@@ -168,7 +172,7 @@ export async function updateTask(req: AuthenticatedRequest, res: Response): Prom
   }
 
   // Optimistic Concurrency Control (OCC) Check
-  if (data.expectedVersion !== undefined && task.version !== data.expectedVersion) {
+  if (data.expectedVersion === undefined || task.version !== data.expectedVersion) {
     const currentPopulated = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
     res.status(409).json({
       code: 'version_conflict',
@@ -193,7 +197,24 @@ export async function updateTask(req: AuthenticatedRequest, res: Response): Prom
   }
 
   task.version += 1;
-  await task.save();
+  try {
+    await task.save();
+  } catch (err: any) {
+    if (err.name === 'VersionError') {
+      const latestTask = await Task.findOne({
+        _id: taskObjectId,
+        tenantId: tenantObjectId,
+        deletedAt: null,
+      }).populate('assigneeId', 'name email avatarUrl');
+      res.status(409).json({
+        code: 'version_conflict',
+        message: 'This task changed while you were saving. Its latest version has been restored.',
+        currentRecord: latestTask,
+      });
+      return;
+    }
+    throw err;
+  }
 
   const updatedTask = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
 
@@ -268,12 +289,21 @@ export async function moveTask(req: AuthenticatedRequest, res: Response): Promis
     return;
   }
 
+  // Prevent moving a card into another board's column within the same tenant.
+  if (targetColumn.boardId.toString() !== task.boardId.toString()) {
+    res.status(409).json({
+      code: 'column_board_mismatch',
+      message: 'Choose a column from the same board as this card.',
+    });
+    return;
+  }
+
   // OCC check
-  if (data.expectedVersion !== undefined && task.version !== data.expectedVersion) {
+  if (data.expectedVersion === undefined || task.version !== data.expectedVersion) {
     const currentPopulated = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
     res.status(409).json({
       code: 'version_conflict',
-      message: 'Card position was altered by another user.',
+      message: 'This card was moved by another teammate. Reload its latest position and try again.',
       currentRecord: currentPopulated,
     });
     return;
@@ -287,7 +317,24 @@ export async function moveTask(req: AuthenticatedRequest, res: Response): Promis
   task.columnId = targetColumnObjectId;
   task.position = newPosition;
   task.version += 1;
-  await task.save();
+  try {
+    await task.save();
+  } catch (err: any) {
+    if (err.name === 'VersionError') {
+      const latestTask = await Task.findOne({
+        _id: taskObjectId,
+        tenantId: tenantObjectId,
+        deletedAt: null,
+      }).populate('assigneeId', 'name email avatarUrl');
+      res.status(409).json({
+        code: 'version_conflict',
+        message: 'This card changed while you were moving it. Its latest position has been restored.',
+        currentRecord: latestTask,
+      });
+      return;
+    }
+    throw err;
+  }
 
   const updatedTask = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
 
@@ -409,12 +456,29 @@ export async function undoTask(req: AuthenticatedRequest, res: Response): Promis
   // If another teammate has modified the card in the meantime, reject undo!
   // PRD Edge case: "Undo of a change someone else has since edited is rejected with a notice"
   if (task.version !== data.expectedVersion) {
+    const currentRecord = await Task.findOne({ _id: taskObjectId, tenantId: tenantObjectId })
+      .populate('assigneeId', 'name email avatarUrl');
     res.status(409).json({
       code: 'conflict_undo_stale',
       message: 'Cannot undo: card was modified by someone else since your action.',
+      currentRecord,
     });
     return;
   }
+
+  if (data.previousState.columnId) {
+    const restoreColumn = await Column.findOne({
+      _id: data.previousState.columnId,
+      tenantId: tenantObjectId,
+      boardId: task.boardId,
+    });
+    if (!restoreColumn) {
+      res.status(409).json({ code: 'column_deleted', message: 'The original column is no longer available.' });
+      return;
+    }
+  }
+
+  const beforeState = task.toObject();
 
   if (data.previousState.columnId) {
     task.columnId = new mongoose.Types.ObjectId(data.previousState.columnId);
@@ -422,26 +486,67 @@ export async function undoTask(req: AuthenticatedRequest, res: Response): Promis
   if (data.previousState.position) {
     task.position = data.previousState.position;
   }
-  if (data.previousState.title) {
+  if (data.previousState.title !== undefined) {
     task.title = data.previousState.title;
   }
-  if (data.previousState.description) {
+  if (data.previousState.description !== undefined) {
     task.description = data.previousState.description;
   }
-  if (data.previousState.priority) {
+  if (data.previousState.priority !== undefined) {
     task.priority = data.previousState.priority;
+  }
+  if (data.previousState.labels !== undefined) task.labels = data.previousState.labels;
+  if (data.previousState.dueDate !== undefined) {
+    task.dueDate = data.previousState.dueDate ? new Date(data.previousState.dueDate) : null;
+  }
+  if (data.previousState.assigneeId !== undefined) {
+    task.assigneeId = data.previousState.assigneeId
+      ? new mongoose.Types.ObjectId(data.previousState.assigneeId)
+      : null;
+  }
+  if (data.previousState.deletedAt !== undefined) {
+    task.deletedAt = data.previousState.deletedAt ? new Date(data.previousState.deletedAt) : null;
   }
 
   task.version += 1;
-  await task.save();
+  try {
+    await task.save();
+  } catch (err: any) {
+    if (err.name === 'VersionError') {
+      const latestTask = await Task.findOne({ _id: taskObjectId, tenantId: tenantObjectId })
+        .populate('assigneeId', 'name email avatarUrl');
+      res.status(409).json({ code: 'conflict_undo_stale', message: 'This task changed again. Reload its latest version before retrying.', currentRecord: latestTask });
+      return;
+    }
+    throw err;
+  }
 
   const updatedTask = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
 
+  await ActivityLog.create({
+    tenantId: tenantObjectId,
+    boardId: task.boardId,
+    actorId: new mongoose.Types.ObjectId(req.user!.id),
+    actorName: req.user!.name,
+    actorEmail: req.user!.email,
+    entityType: 'TASK',
+    entityId: task._id.toString(),
+    action: 'TASK_STATE_RESTORED',
+    before: beforeState,
+    after: updatedTask?.toObject(),
+  });
+
   await recordTenantEvent(
     tenantId,
-    'task.moved',
+    data.previousState.deletedAt !== undefined
+      ? (data.previousState.deletedAt ? 'task.deleted' : 'task.created')
+      : data.previousState.columnId !== undefined || data.previousState.position !== undefined
+        ? 'task.moved'
+        : 'task.updated',
     { id: req.user!.id, name: req.user!.name },
-    { task: updatedTask, isUndo: true }
+    data.previousState.deletedAt
+      ? { taskId: task._id.toString(), boardId: task.boardId, columnId: task.columnId, task: updatedTask, isUndo: true }
+      : { task: updatedTask, isUndo: true }
   );
 
   res.json({ task: updatedTask, message: 'Action undone successfully' });

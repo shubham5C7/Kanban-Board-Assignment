@@ -18,6 +18,14 @@ export function errorHandler(
     return;
   }
 
+  if (err.name === 'VersionError') {
+    res.status(409).json({
+      code: 'version_conflict',
+      message: 'This record changed while you were saving. Reload the latest version and retry.',
+    });
+    return;
+  }
+
   if (err.name === 'CastError' || err.name === 'BSONError' || err.message?.includes('must be a 24 character hex string')) {
     res.status(400).json({
       code: 'invalid_id',

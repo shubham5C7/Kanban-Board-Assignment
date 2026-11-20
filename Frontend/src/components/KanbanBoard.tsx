@@ -10,14 +10,11 @@ import {
   useSensors,
   DragStartEvent,
   DragEndEvent,
-  DragOverEvent,
   DragCancelEvent,
   CollisionDetection,
-  DropAnimation,
-  defaultDropAnimationSideEffects,
   Announcements,
 } from '@dnd-kit/core';
-import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { Column as ColumnType, Task, FilterState } from '../types';
 import { Column } from './Column';
 import { TaskCard } from './TaskCard';
@@ -40,18 +37,6 @@ interface KanbanBoardProps {
   ) => Promise<void>;
 }
 
-const dropAnimationConfig: DropAnimation = {
-  sideEffects: defaultDropAnimationSideEffects({
-    styles: {
-      active: {
-        opacity: '0.4',
-      },
-    },
-  }),
-  duration: 180,
-  easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
-};
-
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   columns,
   tasks,
@@ -64,7 +49,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onMoveTask,
 }) => {
   const [activeTask, setActiveTask] = useState<Task | null>(null);
-  const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
   const originalTasksRef = useRef<Task[]>(tasks);
 
   // Deduplicate columns by both _id and normalized name to prevent duplicate column rendering in the DOM
@@ -81,10 +65,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     });
   }, [columns]);
 
-  // Sync localTasks when external tasks prop changes and user is not actively dragging
+  // Hold a stable task snapshot while dragging so remote updates or hover changes
+  // cannot make neighboring cards jump around under the pointer.
   useEffect(() => {
     if (!activeTask) {
-      setLocalTasks(tasks);
       originalTasksRef.current = tasks;
     }
   }, [tasks, activeTask]);
@@ -102,7 +86,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
   // Human-readable screen reader announcements for accessible drag & drop
   const getTaskTitle = (taskId: string | number) => {
-    const task = localTasks.find(t => t._id === taskId);
+    const task = originalTasksRef.current.find(t => t._id === taskId);
     return task?.title || 'Task';
   };
 
@@ -110,7 +94,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     if (!overId) return undefined;
     const directCol = uniqueColumns.find(c => c._id === overId);
     if (directCol) return directCol.name;
-    const task = localTasks.find(t => t._id === overId);
+    const task = originalTasksRef.current.find(t => t._id === overId);
     if (task) {
       const parentCol = uniqueColumns.find(c => c._id === task.columnId);
       if (parentCol) return parentCol.name;
@@ -155,13 +139,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   const collisionDetectionStrategy: CollisionDetection = args => {
     const pointerCollisions = pointerWithin(args);
     if (pointerCollisions.length > 0) {
-      return pointerCollisions;
+      // The source card keeps a placeholder droppable while its overlay moves.
+      // Ignore that placeholder so it cannot win the drop and send the card
+      // back to its original location.
+      return pointerCollisions.filter(collision => collision.id !== args.active.id);
     }
-    return closestCorners(args);
+    return closestCorners(args).filter(collision => collision.id !== args.active.id);
   };
 
   // Filter tasks
-  const filteredTasks = localTasks.filter(task => {
+  const visibleTasks = activeTask ? originalTasksRef.current : tasks;
+  const filteredTasks = visibleTasks.filter(task => {
     if (filters.search) {
       const q = filters.search.toLowerCase();
       const matchTitle = task.title.toLowerCase().includes(q);
@@ -181,97 +169,67 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   const getColumnTasks = (columnId: string) =>
     filteredTasks
       .filter(t => t.columnId === columnId)
-      .sort((a, b) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0));
+      .sort((a, b) => a.position < b.position ? -1 : a.position > b.position ? 1 : a._id.localeCompare(b._id));
 
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
-    const task = localTasks.find(t => t._id === active.id);
+    const task = tasks.find(t => t._id === active.id);
     if (task) {
       setActiveTask(task);
-      originalTasksRef.current = localTasks;
-    }
-  };
-
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const activeId = active.id as string;
-    const overId = over.id as string;
-
-    const activeItem = localTasks.find(t => t._id === activeId);
-    if (!activeItem) return;
-
-    // Check if `over` is a column or a task
-    const isOverColumn = uniqueColumns.some(c => c._id === overId);
-    const targetColumnId = isOverColumn
-      ? overId
-      : localTasks.find(t => t._id === overId)?.columnId;
-
-    if (!targetColumnId) return;
-
-    if (activeItem.columnId !== targetColumnId) {
-      // Cross-column move during hover: update activeItem's columnId so cards slide smoothly
-      setLocalTasks(prev => {
-        const overIndex = prev.findIndex(t => t._id === overId);
-        let newIndex: number;
-
-        if (isOverColumn) {
-          newIndex = prev.length;
-        } else {
-          newIndex = overIndex >= 0 ? overIndex : prev.length;
-        }
-
-        return prev.map(t => {
-          if (t._id === activeId) {
-            return { ...t, columnId: targetColumnId };
-          }
-          return t;
-        });
-      });
-    } else if (!isOverColumn) {
-      // Same column reorder during hover
-      setLocalTasks(prev => {
-        const oldIndex = prev.findIndex(t => t._id === activeId);
-        const newIndex = prev.findIndex(t => t._id === overId);
-        if (oldIndex !== newIndex && oldIndex !== -1 && newIndex !== -1) {
-          return arrayMove(prev, oldIndex, newIndex);
-        }
-        return prev;
-      });
+      originalTasksRef.current = tasks;
     }
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    setActiveTask(null);
 
     if (!over) {
-      setLocalTasks(originalTasksRef.current);
+      setActiveTask(null);
       return;
     }
 
     const activeId = active.id as string;
     const overId = over.id as string;
 
+    if (activeId === overId) {
+      setActiveTask(null);
+      return;
+    }
+
     const sourceTask = originalTasksRef.current.find(t => t._id === activeId);
-    if (!sourceTask) return;
+    if (!sourceTask) {
+      setActiveTask(null);
+      return;
+    }
 
     const isOverColumn = uniqueColumns.some(c => c._id === overId);
     const targetColumnId = isOverColumn
       ? overId
-      : localTasks.find(t => t._id === overId)?.columnId || sourceTask.columnId;
+      : originalTasksRef.current.find(t => t._id === overId)?.columnId || sourceTask.columnId;
 
-    const destinationTasks = localTasks
+    const destinationTasks = originalTasksRef.current
       .filter(t => t.columnId === targetColumnId && t._id !== activeId)
-      .sort((a, b) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0));
+      .sort((a, b) => a.position.localeCompare(b.position) || a._id.localeCompare(b._id));
 
     let targetIndex: number;
     if (isOverColumn) {
       targetIndex = destinationTasks.length;
     } else {
       const idx = destinationTasks.findIndex(t => t._id === overId);
+      // Drop onto a card means insert immediately before it. The existing
+      // cards keep their relative order and naturally shift down one slot.
       targetIndex = idx >= 0 ? idx : destinationTasks.length;
+    }
+
+    if (sourceTask.columnId === targetColumnId) {
+      const sourceIndex = originalTasksRef.current
+        .filter(task => task.columnId === sourceTask.columnId)
+        .sort((a, b) => a.position.localeCompare(b.position) || a._id.localeCompare(b._id))
+        .findIndex(task => task._id === sourceTask._id);
+      if (sourceIndex === targetIndex) {
+        setActiveTask(null);
+        return;
+      }
     }
 
     let beforePosition: string | null = null;
@@ -291,18 +249,22 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       afterPosition = destinationTasks[targetIndex]?.position || null;
     }
 
-    await onMoveTask(
+    const movePromise = onMoveTask(
       sourceTask._id,
       targetColumnId,
       beforePosition,
       afterPosition,
       sourceTask.version
     );
+    // Remove the overlay now so dnd-kit cannot animate it back to its source
+    // placeholder while the server request is pending. The parent has already
+    // applied the optimistic destination before awaiting its request.
+    setActiveTask(null);
+    await movePromise;
   };
 
-  const handleDragCancel = (event: DragCancelEvent) => {
+  const handleDragCancel = (_event: DragCancelEvent) => {
     setActiveTask(null);
-    setLocalTasks(originalTasksRef.current);
   };
 
   return (
@@ -311,11 +273,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       collisionDetection={collisionDetectionStrategy}
       accessibility={{ announcements }}
       onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="flex-1 overflow-x-auto p-4 flex gap-4 items-start select-none">
+      <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden p-3 sm:p-5 flex gap-3 sm:gap-4 items-stretch select-none snap-x snap-proximity">
         {uniqueColumns.map(column => (
           <Column
             key={column._id}
@@ -336,7 +297,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         )}
       </div>
 
-      <DragOverlay dropAnimation={dropAnimationConfig}>
+      <DragOverlay dropAnimation={null}>
         {activeTask ? (
           <div className="w-72 sm:w-80">
             <TaskCard

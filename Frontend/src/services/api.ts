@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:5000/api/v1';
+const API_BASE = `${(import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '')}/api/v1`;
 
 export class ApiError extends Error {
   code: string;
@@ -17,7 +17,7 @@ export class ApiError extends Error {
 }
 
 function getAuthHeader(): Record<string, string> {
-  const token = localStorage.getItem('kanban_token');
+  const token = localStorage.getItem('kanban_token') || sessionStorage.getItem('kanban_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -50,7 +50,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const api = {
   // Auth
-  login: (credentials: { email: string; password: string }) =>
+  login: (credentials: { email: string; password: string; rememberMe?: boolean }) =>
     request<{ token: string; user: any }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
@@ -58,6 +58,16 @@ export const api = {
 
   register: (payload: { name: string; email: string; password: string }) =>
     request<{ token: string; user: any }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  requestPasswordReset: (email: string) =>
+    request<{ message: string; resetToken?: string }>('/auth/password-reset/request', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  resetPassword: (payload: { token: string; password: string }) =>
+    request<{ message: string }>('/auth/password-reset/confirm', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

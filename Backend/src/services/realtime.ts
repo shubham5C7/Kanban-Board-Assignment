@@ -15,7 +15,7 @@ const activeSockets = new Map<string, PresenceUser>();
 export function initSocketIO(server: HttpServer, clientUrl: string): SocketIOServer {
   io = new SocketIOServer(server, {
     cors: {
-      origin: clientUrl || '*',
+      origin: (clientUrl || 'http://localhost:5173').split(',').map(origin => origin.trim()),
       methods: ['GET', 'POST', 'PATCH', 'DELETE'],
       credentials: true,
     },
@@ -134,9 +134,25 @@ export function initSocketIO(server: HttpServer, clientUrl: string): SocketIOSer
     });
 
     // Presence heartbeat
-    socket.on('presence.heartbeat', (payload: { tenantId: string; boardId?: string; activeTaskId?: string }) => {
+    socket.on('presence.heartbeat', async (payload: { tenantId: string; boardId?: string; activeTaskId?: string }) => {
       const presence = activeSockets.get(socket.id);
-      if (presence) {
+      if (presence && payload.tenantId === presence.tenantId) {
+        // Membership removal or role changes take effect on the next heartbeat.
+        const tenantRecord = await Tenant.findById(presence.tenantId).select('organizationId').lean();
+        const stillMember = tenantRecord && await Membership.exists({
+          userId: user.id,
+          organizationId: tenantRecord.organizationId,
+          $or: [
+            { tenantId: new mongoose.Types.ObjectId(presence.tenantId) },
+            { tenantId: null, role: 'ORG_ADMIN' },
+          ],
+        });
+        if (!stillMember) {
+          socket.leave(`tenant:${presence.tenantId}`);
+          activeSockets.delete(socket.id);
+          broadcastTenantPresence(presence.tenantId);
+          return;
+        }
         presence.lastActive = Date.now();
         if (payload.boardId) presence.boardId = payload.boardId;
         presence.activeTaskId = payload.activeTaskId;
@@ -147,7 +163,7 @@ export function initSocketIO(server: HttpServer, clientUrl: string): SocketIOSer
     // Card focus indicator
     socket.on('cursor.focus', (payload: { tenantId: string; taskId: string | null }) => {
       const presence = activeSockets.get(socket.id);
-      if (presence) {
+      if (presence && payload.tenantId === presence.tenantId) {
         presence.activeTaskId = payload.taskId || undefined;
         presence.lastActive = Date.now();
         broadcastTenantPresence(presence.tenantId);

@@ -37,7 +37,7 @@ const TaskSchema = new Schema<ITask>(
     version: { type: Number, default: 1, required: true },
     deletedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
 
 // Composite indexes leading with tenantId for strict tenant isolation & performance

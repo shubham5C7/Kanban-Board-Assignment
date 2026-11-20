@@ -33,7 +33,7 @@ export const Column: React.FC<ColumnProps> = ({
   return (
     <div
       ref={setNodeRef}
-      className={`w-[85vw] max-w-[320px] sm:w-80 flex-shrink-0 flex flex-col h-full rounded-xl border bg-slate-100/70 dark:bg-slate-900/50 transition-colors select-none ${
+      className={`w-[min(86vw,340px)] sm:w-80 min-h-[min(68vh,620px)] max-h-full snap-start flex-shrink-0 flex flex-col rounded-2xl border bg-slate-100/70 dark:bg-slate-900/50 transition-colors select-none ${
         isOver
           ? 'border-blue-500/80 bg-blue-50/30 dark:bg-blue-950/20'
           : 'border-slate-200/80 dark:border-slate-800'

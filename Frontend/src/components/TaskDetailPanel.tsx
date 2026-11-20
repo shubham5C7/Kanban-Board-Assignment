@@ -36,6 +36,7 @@ interface TaskDetailPanelProps {
   onUpdate: (taskId: string, updates: Partial<Task>, expectedVersion?: number) => Promise<void>;
   onDelete: (taskId: string) => Promise<void>;
   onResolveConflict: (resolvedTask: Partial<Task>) => Promise<void>;
+  onAcceptRemote: (latest: Task) => void;
 }
 
 export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
@@ -51,6 +52,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
   onUpdate,
   onDelete,
   onResolveConflict,
+  onAcceptRemote,
 }) => {
   if (!task) return null;
 
@@ -343,20 +345,27 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
                   Concurrent Edit Conflict Detected
                 </div>
                 <div className="text-amber-800 dark:text-amber-300">
-                  Another teammate updated this card to version {conflictData.currentRecord.version}.
+                  {conflictData.message || `A teammate updated this card to version ${conflictData.currentRecord.version}.`}
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2 pt-1">
               <button
-                onClick={() => onResolveConflict({ title, description, priority })}
+                onClick={() => onResolveConflict({
+                  title,
+                  description,
+                  priority,
+                  labels: labelsInput.split(',').map(label => label.trim()).filter(Boolean),
+                  dueDate: dueDate ? new Date(dueDate).toISOString() : null,
+                  assigneeId: (assigneeId || null) as any,
+                })}
                 className="px-2.5 py-1 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors"
               >
                 Keep My Version
               </button>
               <button
-                onClick={() => onResolveConflict(conflictData.currentRecord)}
+                onClick={() => onAcceptRemote(conflictData.currentRecord)}
                 className="px-2.5 py-1 text-xs font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-300 transition-colors"
               >
                 Take Their Version

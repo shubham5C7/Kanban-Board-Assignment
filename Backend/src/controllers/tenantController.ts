@@ -27,19 +27,16 @@ export async function getTenantsInOrg(req: AuthenticatedRequest, res: Response):
     return;
   }
 
-  // Check if user has membership in org
+  // An org admin can have both an org-level row and tenant-level rows.
   const orgMembership = await Membership.findOne({
     userId: new mongoose.Types.ObjectId(userId),
     organizationId: new mongoose.Types.ObjectId(orgId),
+    tenantId: null,
+    role: 'ORG_ADMIN',
   });
 
-  if (!orgMembership) {
-    res.status(404).json({ code: 'org_not_found', message: 'Organization not found' });
-    return;
-  }
-
   // If org admin, can see all tenants in this org
-  if (orgMembership.role === 'ORG_ADMIN') {
+  if (orgMembership) {
     const tenants = await Tenant.find({ organizationId: new mongoose.Types.ObjectId(orgId) }).sort({ name: 1 });
     res.json({ tenants });
     return;
@@ -53,6 +50,10 @@ export async function getTenantsInOrg(req: AuthenticatedRequest, res: Response):
   }).lean();
 
   const tenantIds = memberships.map(m => m.tenantId);
+  if (tenantIds.length === 0) {
+    res.status(404).json({ code: 'org_not_found', message: 'Organization not found' });
+    return;
+  }
   const tenants = await Tenant.find({ _id: { $in: tenantIds } }).sort({ name: 1 });
   res.json({ tenants });
 }
@@ -61,6 +62,11 @@ export async function createTenant(req: AuthenticatedRequest, res: Response): Pr
   const { orgId } = req.params;
   const userId = req.user!.id;
   const data = CreateTenantSchema.parse(req.body);
+
+  if (!mongoose.isValidObjectId(orgId)) {
+    res.status(404).json({ code: 'org_not_found', message: 'Organization not found' });
+    return;
+  }
 
   // Require ORG_ADMIN for tenant creation
   const orgAdminMembership = await Membership.findOne({

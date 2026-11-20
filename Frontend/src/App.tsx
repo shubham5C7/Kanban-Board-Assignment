@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
 import { useTenant } from './context/TenantContext';
-import { Task, Column, User, FilterState, UndoAction, PresenceUser } from './types';
+import { Task, Column, User, FilterState, UndoAction, PresenceUser, TaskSnapshot } from './types';
 import { api, ApiError } from './services/api';
 import {
   connectSocket,
@@ -25,6 +25,21 @@ import { UndoToast } from './components/UndoToast';
 import { BoardSkeleton } from './components/BoardSkeleton';
 import { AITaskFromTextModal } from './components/AITaskFromTextModal';
 import Confetti from 'react-confetti';
+
+function taskSnapshot(task: Task): TaskSnapshot {
+  const assignee = task.assigneeId;
+  return {
+    columnId: task.columnId,
+    position: task.position,
+    title: task.title,
+    description: task.description,
+    priority: task.priority,
+    labels: [...(task.labels || [])],
+    dueDate: task.dueDate || null,
+    assigneeId: typeof assignee === 'string' ? assignee : assignee?._id || assignee?.id || null,
+    deletedAt: task.deletedAt || null,
+  };
+}
 
 export const App: React.FC = () => {
   const { user, token, isLoading: authLoading } = useAuth();
@@ -50,8 +65,10 @@ export const App: React.FC = () => {
   // Selection & UI State
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [conflictData, setConflictData] = useState<{ currentRecord: Task; message: string } | null>(null);
+  const [moveNotice, setMoveNotice] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>({ search: '', priority: '', assigneeId: '', label: '' });
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
+  const [redoAction, setRedoAction] = useState<UndoAction | null>(null);
 
   // Modals & Navigation
   const [activityOpen, setActivityOpen] = useState(false);
@@ -79,6 +96,11 @@ export const App: React.FC = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useEffect(() => {
+    setUndoAction(null);
+    setRedoAction(null);
+  }, [currentTenant?._id, currentBoard?._id]);
 
   const triggerConfetti = () => {
     if (confettiTimerRef.current) {
@@ -153,12 +175,15 @@ export const App: React.FC = () => {
         setPresenceUsers(users);
       },
       onTaskEvent: evt => {
+        if (evt.seq) setLastSeenSeq(seq => Math.max(seq, evt.seq!));
         handleTaskEvent(evt);
       },
       onColumnEvent: evt => {
+        if (evt.seq) setLastSeenSeq(seq => Math.max(seq, evt.seq!));
         handleColumnEvent(evt);
       },
       onBoardEvent: evt => {
+        if (evt.seq) setLastSeenSeq(seq => Math.max(seq, evt.seq!));
         refreshBoards();
       },
       onReplayEvents: events => {
@@ -269,6 +294,8 @@ export const App: React.FC = () => {
   };
 
   const handleBatchEvents = (events: any[]) => {
+    const highestSeq = events.reduce((max, evt) => Math.max(max, Number(evt.seq) || 0), 0);
+    if (highestSeq) setLastSeenSeq(seq => Math.max(seq, highestSeq));
     events.forEach(evt => {
       if (evt.type?.startsWith('column.')) {
         handleColumnEvent(evt);
@@ -334,46 +361,105 @@ export const App: React.FC = () => {
       // Set Undo Toast
       setUndoAction({
         taskId,
+        tenantId: currentTenant._id,
+        boardId: currentBoard?._id || originalTask.boardId,
         title: originalTask.title,
-        previousColumnId,
-        previousPosition,
+        beforeState: taskSnapshot(originalTask),
+        afterState: taskSnapshot(res.task),
         expectedVersion: res.task.version,
         timestamp: Date.now(),
       });
+      setRedoAction(null);
     } catch (err: any) {
       console.error('[App] Move failed, rolling back', err);
-      // Rollback to original state
-      setTasks(prev =>
-        prev.map(t =>
-          t._id === taskId
-            ? { ...t, columnId: previousColumnId, position: previousPosition, version: originalTask.version }
-            : t
-        )
-      );
-
-      if (err instanceof ApiError && err.statusCode === 409) {
-        alert(`Conflict: ${err.message}`);
+      const latestTask = err instanceof ApiError && err.currentRecord
+        ? err.currentRecord as Task
+        : null;
+      if (err instanceof ApiError && (err.code === 'task_not_found' || (err.code === 'version_conflict' && err.currentRecord === null))) {
+        setTasks(prev => prev.filter(task => task._id !== taskId));
+        setMoveNotice('This card was deleted by someone else and has been removed from the board.');
+      } else if (err instanceof ApiError && ['column_deleted', 'column_board_mismatch'].includes(err.code)) {
+        try {
+          if (!currentBoard) throw new Error('No active board to refresh');
+          const latestBoard = await api.getBoard(currentTenant._id, currentBoard._id);
+          setColumns(latestBoard.columns);
+          setTasks(latestBoard.tasks);
+          setMoveNotice(err.code === 'column_deleted'
+            ? 'That column was removed. The board has been refreshed; choose another column.'
+            : 'Cards can only be moved between columns on the same board.');
+        } catch {
+          setTasks(prev => prev.map(task => task._id === taskId
+            ? { ...task, columnId: previousColumnId, position: previousPosition, version: originalTask.version }
+            : task));
+          setMoveNotice('The board changed while moving this card. Refresh the board and try again.');
+        }
+      } else {
+        setTasks(prev => prev.map(task => task._id === taskId
+          ? latestTask || { ...task, columnId: previousColumnId, position: previousPosition, version: originalTask.version }
+          : task));
+        if (latestTask && selectedTask?._id === taskId) setSelectedTask(latestTask);
+        if (err instanceof ApiError && err.statusCode === 409) {
+          setMoveNotice('This card changed while you were moving it. Its latest position is shown; try again if needed.');
+        } else {
+          setMoveNotice(err.message || 'Could not move the card. Its previous position has been restored.');
+        }
       }
     }
   };
 
   // 7. Perform Undo
   const handleUndo = async (action: UndoAction) => {
-    if (!currentTenant) return;
-    setUndoAction(null);
+    if (!currentTenant || action.tenantId !== currentTenant._id || (currentBoard && action.boardId !== currentBoard._id)) return;
 
     try {
       const res = await api.undoTask(currentTenant._id, action.taskId, {
         expectedVersion: action.expectedVersion,
-        previousState: {
-          columnId: action.previousColumnId,
-          position: action.previousPosition,
-        },
+        previousState: action.beforeState,
       });
 
-      setTasks(prev => prev.map(t => (t._id === action.taskId ? res.task : t)));
+      setTasks(prev => res.task.deletedAt
+        ? prev.filter(task => task._id !== action.taskId)
+        : prev.some(task => task._id === action.taskId)
+          ? prev.map(task => task._id === action.taskId ? res.task : task)
+          : [...prev, res.task]);
+      if (selectedTask?._id === action.taskId) setSelectedTask(res.task);
+      setUndoAction(null);
+      setRedoAction(null);
+      setRedoAction({ ...action, expectedVersion: res.task.version, timestamp: Date.now() });
     } catch (err: any) {
-      alert(err.message || 'Unable to undo: card was modified since.');
+      const latest = err instanceof ApiError ? err.currentRecord as Task | undefined : undefined;
+      if (latest) {
+        setTasks(prev => prev.map(task => task._id === latest._id ? latest : task));
+        if (selectedTask?._id === latest._id) setSelectedTask(latest);
+      }
+      setUndoAction(null);
+      setMoveNotice('Undo was not applied because this task changed. The latest version is shown.');
+    }
+  };
+
+  const handleRedo = async (action: UndoAction) => {
+    if (!currentTenant || action.tenantId !== currentTenant._id || (currentBoard && action.boardId !== currentBoard._id)) return;
+    try {
+      const res = await api.undoTask(currentTenant._id, action.taskId, {
+        expectedVersion: action.expectedVersion,
+        previousState: action.afterState,
+      });
+      setTasks(prev => res.task.deletedAt
+        ? prev.filter(task => task._id !== action.taskId)
+        : prev.some(task => task._id === action.taskId)
+          ? prev.map(task => task._id === action.taskId ? res.task : task)
+          : [...prev, res.task]);
+      if (selectedTask?._id === action.taskId) setSelectedTask(res.task);
+      setRedoAction(null);
+      setUndoAction({ ...action, expectedVersion: res.task.version, timestamp: Date.now() });
+    } catch (err: any) {
+      const latest = err instanceof ApiError ? err.currentRecord as Task | undefined : undefined;
+      if (latest) {
+        setTasks(prev => prev.map(task => task._id === latest._id ? latest : task));
+        if (selectedTask?._id === latest._id) setSelectedTask(latest);
+      }
+      setRedoAction(null);
+      setMoveNotice('Redo was not applied because this task changed. The latest version is shown.');
     }
   };
 
@@ -384,6 +470,7 @@ export const App: React.FC = () => {
     expectedVersion?: number
   ) => {
     if (!currentTenant) return;
+    const originalTask = tasks.find(task => task._id === taskId);
 
     try {
       const res = await api.updateTask(currentTenant._id, taskId, {
@@ -394,6 +481,23 @@ export const App: React.FC = () => {
       setTasks(prev => prev.map(t => (t._id === taskId ? res.task : t)));
       setSelectedTask(res.task);
       setConflictData(null);
+      if (originalTask) {
+        const beforeState = taskSnapshot(originalTask);
+        const afterState = taskSnapshot(res.task);
+        if (JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
+          setUndoAction({
+            taskId,
+            tenantId: currentTenant._id,
+            boardId: currentBoard?._id || originalTask.boardId,
+            title: res.task.title,
+            beforeState,
+            afterState,
+            expectedVersion: res.task.version,
+            timestamp: Date.now(),
+          });
+          setRedoAction(null);
+        }
+      }
 
       // Trigger Confetti if updated to Done / Completed
       if (updates.columnId) {
@@ -408,10 +512,14 @@ export const App: React.FC = () => {
       }
     } catch (err: any) {
       if (err instanceof ApiError && err.statusCode === 409) {
-        setConflictData({
-          currentRecord: err.currentRecord,
-          message: err.message,
-        });
+        if (err.currentRecord) {
+          const latest = err.currentRecord as Task;
+          setTasks(prev => prev.map(task => task._id === latest._id ? latest : task));
+          setConflictData({ currentRecord: latest, message: err.message });
+        } else {
+          setConflictData(null);
+          setMoveNotice('This task was removed or changed again. Refresh the board before editing it.');
+        }
       } else {
         alert(err.message || 'Failed to update task');
       }
@@ -422,10 +530,25 @@ export const App: React.FC = () => {
   const handleDeleteTask = async (taskId: string) => {
     if (!currentTenant) return;
     if (!confirm('Are you sure you want to delete this task?')) return;
+    const originalTask = tasks.find(task => task._id === taskId);
 
     try {
       await api.deleteTask(currentTenant._id, taskId);
       setTasks(prev => prev.filter(t => t._id !== taskId));
+      if (originalTask) {
+        const deletedState = { ...taskSnapshot(originalTask), deletedAt: new Date().toISOString() };
+        setUndoAction({
+          taskId,
+          tenantId: currentTenant._id,
+          boardId: originalTask.boardId,
+          title: originalTask.title,
+          beforeState: taskSnapshot(originalTask),
+          afterState: deletedState,
+          expectedVersion: originalTask.version + 1,
+          timestamp: Date.now(),
+        });
+        setRedoAction(null);
+      }
       setSelectedTask(null);
     } catch (err: any) {
       alert(err.message || 'Failed to delete task');
@@ -435,6 +558,7 @@ export const App: React.FC = () => {
   // 10. Resolve Conflict in Side Panel
   const handleResolveConflict = async (resolved: Partial<Task>) => {
     if (!selectedTask || !currentTenant) return;
+    const remoteBefore = conflictData?.currentRecord || selectedTask;
     const currentVersion = conflictData?.currentRecord.version || selectedTask.version;
 
     try {
@@ -446,9 +570,36 @@ export const App: React.FC = () => {
       setTasks(prev => prev.map(t => (t._id === selectedTask._id ? res.task : t)));
       setSelectedTask(res.task);
       setConflictData(null);
+      const beforeState = taskSnapshot(remoteBefore);
+      const afterState = taskSnapshot(res.task);
+      if (JSON.stringify(beforeState) !== JSON.stringify(afterState)) {
+        setUndoAction({
+          taskId: res.task._id,
+          tenantId: currentTenant._id,
+          boardId: res.task.boardId,
+          title: res.task.title,
+          beforeState,
+          afterState,
+          expectedVersion: res.task.version,
+          timestamp: Date.now(),
+        });
+        setRedoAction(null);
+      }
     } catch (err: any) {
-      alert(err.message || 'Conflict resolution failed');
+      if (err instanceof ApiError && err.currentRecord) {
+        const latest = err.currentRecord as Task;
+        setTasks(prev => prev.map(task => task._id === latest._id ? latest : task));
+        setConflictData({ currentRecord: latest, message: err.message });
+      } else {
+        setMoveNotice(err.message || 'Conflict resolution failed. Refresh the task and try again.');
+      }
     }
+  };
+
+  const handleAcceptRemoteTask = (latest: Task) => {
+    setTasks(prev => prev.map(task => task._id === latest._id ? latest : task));
+    setSelectedTask(latest);
+    setConflictData(null);
   };
 
   // 11. Create Task Submit
@@ -464,6 +615,17 @@ export const App: React.FC = () => {
       }
       return [...prev, res.task];
     });
+    setUndoAction({
+      taskId: res.task._id,
+      tenantId: currentTenant._id,
+      boardId: res.task.boardId,
+      title: res.task.title,
+      beforeState: { deletedAt: new Date().toISOString() },
+      afterState: taskSnapshot(res.task),
+      expectedVersion: res.task.version,
+      timestamp: Date.now(),
+    });
+    setRedoAction(null);
   };
 
   // 12. Create Board Submit
@@ -550,6 +712,12 @@ export const App: React.FC = () => {
             if (currentTenant) joinTenantRoom(currentTenant._id, currentBoard?._id, lastSeenSeq);
           }}
         />
+        {moveNotice && (
+          <div role="status" className="mx-3 mt-2 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm dark:border-amber-900/70 dark:bg-amber-950/50 dark:text-amber-100">
+            <span>{moveNotice}</span>
+            <button type="button" onClick={() => setMoveNotice(null)} className="shrink-0 rounded-md px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900" aria-label="Dismiss message">Dismiss</button>
+          </div>
+        )}
 
         {/* Board Surface */}
         <main className="flex-1 flex overflow-hidden relative">
@@ -590,6 +758,7 @@ export const App: React.FC = () => {
               onUpdate={handleUpdateTask}
               onDelete={handleDeleteTask}
               onResolveConflict={handleResolveConflict}
+              onAcceptRemote={handleAcceptRemoteTask}
             />
           )}
         </main>
@@ -632,8 +801,10 @@ export const App: React.FC = () => {
       {/* Floating Undo Toast (Cmd+Z) */}
       <UndoToast
         action={undoAction}
+        redoAction={redoAction}
         onUndo={handleUndo}
-        onDismiss={() => setUndoAction(null)}
+        onRedo={handleRedo}
+        onDismiss={() => { setUndoAction(null); setRedoAction(null); }}
       />
 
       {/* Confetti Celebration on Task Completion (Fast velocity, strictly 2 seconds) */}

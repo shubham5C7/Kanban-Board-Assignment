@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Column } from '../models/Column';
+import { Board } from '../models/Board';
 import { Task } from '../models/Task';
 import { ActivityLog } from '../models/ActivityLog';
 import { recordTenantEvent } from '../services/eventService';
@@ -33,6 +34,12 @@ export async function createColumn(req: AuthenticatedRequest, res: Response): Pr
 
   const tenantObjectId = new mongoose.Types.ObjectId(tenantId);
   const boardObjectId = new mongoose.Types.ObjectId(boardId);
+
+  const board = await Board.findOne({ _id: boardObjectId, tenantId: tenantObjectId });
+  if (!board) {
+    res.status(404).json({ code: 'board_not_found', message: 'Board not found in this tenant' });
+    return;
+  }
 
   // Find last column to calculate position
   const lastCol = await Column.findOne({ tenantId: tenantObjectId, boardId: boardObjectId })
@@ -88,7 +95,7 @@ export async function updateColumn(req: AuthenticatedRequest, res: Response): Pr
   }
 
   // OCC check
-  if (data.expectedVersion !== undefined && column.version !== data.expectedVersion) {
+  if (data.expectedVersion === undefined || column.version !== data.expectedVersion) {
     res.status(409).json({
       code: 'version_conflict',
       message: 'Column was modified by another user.',
@@ -127,7 +134,7 @@ export async function moveColumn(req: AuthenticatedRequest, res: Response): Prom
     return;
   }
 
-  if (data.expectedVersion !== undefined && column.version !== data.expectedVersion) {
+  if (data.expectedVersion === undefined || column.version !== data.expectedVersion) {
     res.status(409).json({
       code: 'version_conflict',
       message: 'Column position conflict',

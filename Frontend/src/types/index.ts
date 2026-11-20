@@ -107,11 +107,25 @@ export interface FilterState {
   label: string;
 }
 
+export interface TaskSnapshot {
+  columnId?: string;
+  position?: string;
+  title?: string;
+  description?: string;
+  priority?: TaskPriority;
+  labels?: string[];
+  dueDate?: string | null;
+  assigneeId?: string | null;
+  deletedAt?: string | null;
+}
+
 export interface UndoAction {
   taskId: string;
+  tenantId: string;
+  boardId: string;
   title: string;
-  previousColumnId: string;
-  previousPosition: string;
+  beforeState: TaskSnapshot;
+  afterState: TaskSnapshot;
   expectedVersion: number;
   timestamp: number;
 }

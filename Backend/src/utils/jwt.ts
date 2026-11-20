@@ -2,9 +2,9 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { ENV } from '../config/env';
 import { AuthUser } from '../types';
 
-export function signToken(user: AuthUser): string {
+export function signToken(user: AuthUser, rememberMe = false): string {
   const options: SignOptions = {
-    expiresIn: (ENV.JWT_EXPIRES_IN as any) || '7d',
+    expiresIn: (rememberMe ? '30d' : ENV.JWT_EXPIRES_IN || '7d') as any,
   };
 
   return jwt.sign(

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 import {
   User as UserIcon,
   Lock,
@@ -51,13 +52,18 @@ const carouselSlides = [
 ];
 
 export const LoginView: React.FC = () => {
-  const { login, isLoading } = useAuth();
+  const { login, register, isLoading } = useAuth();
 
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
   const [email, setEmail] = useState('arjun@acme.com');
   const [password, setPassword] = useState('Password123!');
+  const [name, setName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Carousel State
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -69,20 +75,58 @@ export const LoginView: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get('resetToken');
+    if (token) {
+      setResetToken(token);
+      setMode('reset');
+      setNotice('Choose a new password for your account.');
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     try {
-      await login(email, password);
+      if (mode === 'login') {
+        await login(email, password, rememberMe);
+      } else if (mode === 'register') {
+        if (password !== confirmPassword) throw new Error('Passwords do not match.');
+        await register(name, email, password);
+      } else if (mode === 'forgot') {
+        const result = await api.requestPasswordReset(email);
+        if (result.resetToken) {
+          setResetToken(result.resetToken);
+          setMode('reset');
+          setNotice('Development reset link ready. Choose a new password below.');
+        } else {
+          setNotice(result.message);
+        }
+      } else {
+        if (password !== confirmPassword) throw new Error('Passwords do not match.');
+        await api.resetPassword({ token: resetToken, password });
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setMode('login');
+        setPassword('');
+        setConfirmPassword('');
+        setResetToken('');
+        setNotice('Password updated. Sign in with your new password.');
+      }
     } catch (err: any) {
       setError(err.message || 'Invalid email or password');
     }
   };
 
-  const handlePersonaSelect = (persona: Persona) => {
+  const handlePersonaSelect = async (persona: Persona) => {
     setEmail(persona.email);
     setPassword('Password123!');
-    login(persona.email, 'Password123!');
+    setError(null);
+    try {
+      await login(persona.email, 'Password123!', rememberMe);
+    } catch (err: any) {
+      setError(err.message || `Demo account ${persona.email} is unavailable. Seed demo data first.`);
+    }
   };
 
   return (
@@ -115,10 +159,10 @@ export const LoginView: React.FC = () => {
               {/* Form Heading */}
               <div>
                 <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
-                  Welcome back
+                  {mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : mode === 'forgot' ? 'Reset your password' : 'Choose a new password'}
                 </h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-                  Please enter your details to sign in.
+                  {mode === 'login' ? 'Please enter your details to sign in.' : mode === 'register' ? 'Your workspace and main branch will be created automatically.' : mode === 'forgot' ? 'We’ll email a secure reset link if the account exists.' : 'Use a new password with at least 8 characters.'}
                 </p>
               </div>
 
@@ -127,9 +171,20 @@ export const LoginView: React.FC = () => {
                   {error}
                 </div>
               )}
+              {notice && (
+                <div role="status" className="p-3 text-xs bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-xl">
+                  {notice}
+                </div>
+              )}
 
               {/* Authentication Form */}
               <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+                {mode === 'register' && (
+                  <div className="space-y-2">
+                    <label htmlFor="register-name" className="text-sm font-semibold text-slate-700 dark:text-slate-300">Full name</label>
+                    <input id="register-name" type="text" value={name} onChange={event => setName(event.target.value)} required minLength={2} autoComplete="name" className="w-full px-4 py-3 text-sm bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-100 focus:outline-none focus:border-[#5D8FFC]" />
+                  </div>
+                )}
                 {/* Email Input with User Silhouette Inline Icon */}
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -149,21 +204,12 @@ export const LoginView: React.FC = () => {
                 </div>
 
                 {/* Password Input with Key Icon and Eye Toggle */}
-                <div className="space-y-2">
+                {mode !== 'forgot' && <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">
                       Password
                     </label>
-                    <a
-                      href="#forgot"
-                      onClick={e => {
-                        e.preventDefault();
-                        alert('Demo mode: please use the test personas below.');
-                      }}
-                      className="text-[11px] font-medium text-[#5D8FFC] hover:underline"
-                    >
-                      Forgot password?
-                    </a>
+                    {mode === 'login' && <button type="button" onClick={() => { setMode('forgot'); setError(null); setNotice(null); }} className="text-[11px] font-medium text-[#5D8FFC] hover:underline">Forgot password?</button>}
                   </div>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -172,6 +218,8 @@ export const LoginView: React.FC = () => {
                       value={password}
                       onChange={e => setPassword(e.target.value)}
                       required
+                      minLength={mode === 'register' || mode === 'reset' ? 8 : undefined}
+                      autoComplete={mode === 'register' || mode === 'reset' ? 'new-password' : 'current-password'}
                       placeholder="••••••••••••"
                       className="w-full pl-11 pr-11 py-3 text-sm bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-[#5D8FFC] focus:ring-4 focus:ring-[#5D8FFC]/10 transition-all"
                     />
@@ -188,10 +236,17 @@ export const LoginView: React.FC = () => {
                       )}
                     </button>
                   </div>
-                </div>
+                </div>}
+
+                {(mode === 'register' || mode === 'reset') && (
+                  <div className="space-y-2">
+                    <label htmlFor="confirm-password" className="text-sm font-semibold text-slate-700 dark:text-slate-300">Confirm password</label>
+                    <input id="confirm-password" type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} required minLength={8} autoComplete="new-password" className="w-full px-4 py-3 text-sm bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-100 focus:outline-none focus:border-[#5D8FFC]" />
+                  </div>
+                )}
 
                 {/* Remember Me Checkbox */}
-                <div className="flex items-center">
+                {mode === 'login' && <div className="flex items-center">
                   <input
                     id="remember-me"
                     type="checkbox"
@@ -205,7 +260,7 @@ export const LoginView: React.FC = () => {
                   >
                     Remember me for 30 days
                   </label>
-                </div>
+                </div>}
 
                 {/* Primary CTA Button: LOGIN */}
                 <button
@@ -213,15 +268,18 @@ export const LoginView: React.FC = () => {
                   disabled={isLoading}
                   className="w-full py-3 px-4 bg-[#4779ee] hover:bg-[#3868d8] disabled:opacity-60 text-white font-semibold text-sm rounded-xl shadow-lg shadow-[#5D8FFC]/25 hover:shadow-xl hover:shadow-[#5D8FFC]/30 transition-all flex items-center justify-center gap-2"
                 >
-                  {isLoading ? 'SIGNING IN...' : 'LOGIN'}
+                  {isLoading ? 'SIGNING IN...' : mode === 'login' ? 'LOGIN' : mode === 'register' ? 'CREATE ACCOUNT' : mode === 'forgot' ? 'SEND RESET LINK' : 'UPDATE PASSWORD'}
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </form>
 
+              {(mode === 'forgot' || mode === 'reset') && <p className="text-center text-sm text-slate-500"><button type="button" onClick={() => { setMode('login'); setError(null); setNotice(null); }} className="font-semibold text-[#4779ee] hover:underline">Back to sign in</button></p>}
+              {mode === 'register' && <p className="text-center text-sm text-slate-500">Already registered? <button type="button" onClick={() => { setMode('login'); setError(null); }} className="font-semibold text-[#4779ee] hover:underline">Sign in</button></p>}
+
             </div>
 
             {/* Quick 1-Click Test Personas */}
-            <div className="hidden sm:block pt-3 border-t border-slate-100 dark:border-slate-800">
+            {mode === 'login' && <div className="hidden sm:block pt-3 border-t border-slate-100 dark:border-slate-800">
               <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-3 flex items-center justify-between">
                 <span>Demo accounts · one click sign in</span>
               </div>
@@ -241,7 +299,7 @@ export const LoginView: React.FC = () => {
                   </button>
                 ))}
               </div>
-            </div>
+            </div>}
           </div>
 
           {/* ========================================================

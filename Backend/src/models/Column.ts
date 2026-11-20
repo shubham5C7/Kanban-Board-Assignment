@@ -20,7 +20,7 @@ const ColumnSchema = new Schema<IColumn>(
     version: { type: Number, default: 1, required: true },
     color: { type: String, default: '#64748b' },
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
 
 // Composite index leading with tenantId for strict tenant-level isolation

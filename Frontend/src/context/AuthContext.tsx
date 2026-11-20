@@ -8,7 +8,8 @@ interface AuthContextType {
   memberships: Membership[];
   token: string | null;
   isLoading: boolean;
-  login: (email: string, password?: string) => Promise<void>;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
 }
@@ -18,7 +19,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('kanban_token'));
+  const [token, setToken] = useState<string | null>(localStorage.getItem('kanban_token') || sessionStorage.getItem('kanban_token'));
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const fetchProfile = async () => {
@@ -42,10 +43,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [token]);
 
-  const login = async (email: string, password = 'Password123!') => {
+  const login = async (email: string, password: string, rememberMe = false) => {
     setIsLoading(true);
     try {
-      const data = await api.login({ email, password });
+      const data = await api.login({ email, password, rememberMe });
+      localStorage.removeItem('kanban_token');
+      sessionStorage.removeItem('kanban_token');
+      (rememberMe ? localStorage : sessionStorage).setItem('kanban_token', data.token);
+      setToken(data.token);
+      setUser(data.user);
+      await fetchProfile();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const register = async (name: string, email: string, password: string) => {
+    setIsLoading(true);
+    try {
+      const data = await api.register({ name, email, password });
+      sessionStorage.removeItem('kanban_token');
       localStorage.setItem('kanban_token', data.token);
       setToken(data.token);
       setUser(data.user);
@@ -57,6 +74,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = () => {
     localStorage.removeItem('kanban_token');
+    sessionStorage.removeItem('kanban_token');
     setToken(null);
     setUser(null);
     setMemberships([]);
@@ -71,6 +89,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         token,
         isLoading,
         login,
+        register,
         logout,
         refreshProfile: fetchProfile,
       }}

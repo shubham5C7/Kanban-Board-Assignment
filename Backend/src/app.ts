@@ -7,10 +7,8 @@ import { errorHandler } from './middleware/errorHandler';
 export function createApp(): Application {
   const app = express();
 
-  app.use(cors({
-    origin: '*',
-    credentials: true,
-  }));
+  const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173').split(',').map(origin => origin.trim());
+  app.use(cors({ origin: allowedOrigins, credentials: true }));
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan('dev'));
