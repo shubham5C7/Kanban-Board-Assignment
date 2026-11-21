@@ -10,6 +10,7 @@ import { signToken } from '../utils/jwt';
 import { AuthenticatedRequest } from '../types';
 import { ENV } from '../config/env';
 import { isMailConfigured, sendPasswordResetEmail } from '../services/mailer';
+import { createDefaultBoard, ensureDefaultBoardsForUser } from '../services/defaultBoard';
 
 const RegisterSchema = z.object({
   email: z.string().trim().email(),
@@ -62,6 +63,12 @@ export async function register(req: Request, res: Response): Promise<void> {
     throw err;
   }
 
+  try {
+    await createDefaultBoard(tenant, user);
+  } catch (err) {
+    console.error('[Auth] Failed to create default board for new workspace', err);
+  }
+
   const token = signToken({ id: user._id.toString(), email: user.email, name: user.name }, true);
 
   res.status(201).json({
@@ -88,6 +95,12 @@ export async function login(req: Request, res: Response): Promise<void> {
   if (!isMatch) {
     res.status(401).json({ code: 'invalid_credentials', message: 'Invalid email or password' });
     return;
+  }
+
+  try {
+    await ensureDefaultBoardsForUser(user);
+  } catch (err) {
+    console.error('[Auth] Failed to ensure a default board for the user', err);
   }
 
   const token = signToken({ id: user._id.toString(), email: user.email, name: user.name }, data.rememberMe);

@@ -7,6 +7,8 @@ export interface IColumn extends Document {
   position: string;
   version: number;
   color?: string;
+  deletedAt?: Date | null;
+  deletedBy?: mongoose.Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,6 +21,8 @@ const ColumnSchema = new Schema<IColumn>(
     position: { type: String, required: true },
     version: { type: Number, default: 1, required: true },
     color: { type: String, default: '#64748b' },
+    deletedAt: { type: Date, default: null, index: true },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true, optimisticConcurrency: true }
 );

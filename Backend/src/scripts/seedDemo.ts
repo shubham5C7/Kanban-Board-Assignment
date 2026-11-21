@@ -68,12 +68,12 @@ async function run() {
   }
 
   for (const [tenantName, tenant] of tenants) {
-    let board = await Board.findOne({ tenantId: tenant._id, name: `${tenantName} Board` });
+    let board = await Board.findOne({ tenantId: tenant._id, name: `${tenantName} Board`, deletedAt: null });
     if (!board) {
       const creator = tenantName === 'acme-nyc' ? users.get('arjun@acme.com') : tenantName === 'acme-lon' ? users.get('david@acme.com') : users.get('john@globex.com');
       board = await Board.create({ tenantId: tenant._id, name: `${tenantName} Board`, description: 'Shared demo board', version: 1, createdBy: creator._id });
     }
-    let columns = await Column.find({ tenantId: tenant._id, boardId: board._id }).sort({ position: 1 });
+    let columns = await Column.find({ tenantId: tenant._id, boardId: board._id, deletedAt: null }).sort({ position: 1 });
     if (columns.length === 0) {
       let position: string | null = null;
       for (const name of ['To Do', 'In Progress', 'Done']) {
@@ -81,7 +81,7 @@ async function run() {
         columns.push(await Column.create({ tenantId: tenant._id, boardId: board._id, name, color: '#64748b', position, version: 1 }));
       }
     }
-    if (await Task.countDocuments({ tenantId: tenant._id, boardId: board._id }) === 0) {
+    if (await Task.countDocuments({ tenantId: tenant._id, boardId: board._id, deletedAt: null }) === 0) {
       await Task.create({ tenantId: tenant._id, boardId: board._id, columnId: columns[0]._id, title: 'Welcome to your shared board', description: 'Drag this card between columns to try the workflow.', position: generateKeyBetween(null, null), version: 1 });
     }
   }

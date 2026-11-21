@@ -14,6 +14,7 @@ interface TenantContextType {
   selectOrganization: (orgId: string) => Promise<void>;
   selectTenant: (tenantId: string) => Promise<void>;
   selectBoard: (boardId: string) => void;
+  deleteBoard: (boardId: string) => Promise<void>;
   refreshBoards: () => Promise<void>;
   refreshTenants: () => Promise<void>;
   theme: 'light' | 'dark';
@@ -105,11 +106,11 @@ export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     try {
       const res = await api.getBoards(tenantId);
       setBoards(res.boards);
-      if (res.boards.length > 0) {
-        setCurrentBoard(res.boards[0]);
-      } else {
-        setCurrentBoard(null);
-      }
+      setCurrentBoard(current =>
+        current && res.boards.some(board => board._id === current._id)
+          ? current
+          : res.boards[0] || null
+      );
     } catch (err) {
       console.error('[TenantContext] Failed to load boards', err);
     }
@@ -135,6 +136,17 @@ export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const found = boards.find(b => b._id === boardId);
     if (found) {
       setCurrentBoard(found);
+    }
+  };
+
+  const deleteBoard = async (boardId: string) => {
+    if (!currentTenant) throw new Error('Select a branch before deleting a board.');
+    await api.deleteBoard(currentTenant._id, boardId);
+    const boardIndex = boards.findIndex(board => board._id === boardId);
+    const remainingBoards = boards.filter(board => board._id !== boardId);
+    setBoards(remainingBoards);
+    if (currentBoard?._id === boardId) {
+      setCurrentBoard(remainingBoards[Math.min(Math.max(boardIndex, 0), remainingBoards.length - 1)] || null);
     }
   };
 
@@ -169,6 +181,7 @@ export const TenantProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         selectOrganization,
         selectTenant,
         selectBoard,
+        deleteBoard,
         refreshBoards: () => (currentTenant ? loadBoardsForTenant(currentTenant._id) : Promise.resolve()),
         refreshTenants: () => (currentOrg ? loadTenantsForOrg(currentOrg._id) : Promise.resolve()),
         theme,

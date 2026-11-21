@@ -12,21 +12,6 @@ import {
   Zap,
 } from 'lucide-react';
 
-interface Persona {
-  name: string;
-  email: string;
-  role: string;
-  branch: string;
-}
-
-const demoAccounts: Persona[] = [
-  { name: 'Arjun Mehta', email: 'arjun@acme.com', role: 'Admin', branch: 'Acme New York' },
-  { name: 'Meera Patel', email: 'meera@acme.com', role: 'Member', branch: 'Acme New York' },
-  { name: 'Priya Sharma', email: 'priya@acme.com', role: 'Org Admin', branch: 'Global HQ' },
-  { name: 'David Smith', email: 'david@acme.com', role: 'Admin', branch: 'Acme London' },
-  { name: 'John Doe', email: 'john@globex.com', role: 'Org Admin', branch: 'Globex Tokyo' },
-];
-
 const carouselSlides = [
   {
     tag: 'REAL-TIME WORKFLOW',
@@ -94,6 +79,10 @@ export const LoginView: React.FC = () => {
       } else if (mode === 'register') {
         if (password !== confirmPassword) throw new Error('Passwords do not match.');
         await register(name, email, password);
+        setMode('login');
+        setPassword('');
+        setConfirmPassword('');
+        setNotice('Account created. Please sign in with your new account.');
       } else if (mode === 'forgot') {
         const result = await api.requestPasswordReset(email);
         if (result.resetToken) {
@@ -118,26 +107,15 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  const handlePersonaSelect = async (persona: Persona) => {
-    setEmail(persona.email);
-    setPassword('Password123!');
-    setError(null);
-    try {
-      await login(persona.email, 'Password123!', rememberMe);
-    } catch (err: any) {
-      setError(err.message || `Demo account ${persona.email} is unavailable. Seed demo data first.`);
-    }
-  };
-
   return (
-    <div className="h-dvh w-full relative overflow-hidden bg-slate-50 dark:bg-[#0B0F19] flex items-center justify-center p-3 sm:p-6 transition-colors">
-      <div className="relative w-full h-full max-w-5xl flex items-center justify-center">
+    <div className="min-h-dvh w-full relative bg-slate-50 dark:bg-[#0B0F19] flex items-center justify-center px-3 py-3 sm:px-6 sm:py-4 transition-colors">
+      <div className="relative w-full max-w-5xl flex items-center justify-center">
         {/* The Split-Screen Card */}
-        <div className="relative w-full max-h-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-xl shadow-slate-200/70 dark:shadow-black/40 overflow-hidden grid grid-cols-1 xl:grid-cols-2">
+        <div className="relative w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-xl shadow-slate-200/70 dark:shadow-black/40 grid grid-cols-1 md:grid-cols-2">
           {/* ========================================================
               LEFT ZONE: Functional, Distraction-Free Authentication Form
              ======================================================== */}
-          <div className="p-4 sm:p-7 lg:p-9 flex flex-col justify-between gap-4 sm:gap-5">
+          <div className={`p-4 sm:p-7 lg:p-9 flex flex-col gap-4 sm:gap-5 ${mode === 'register' ? 'justify-start' : 'justify-between'}`}>
             <div className="space-y-4 sm:space-y-6">
               {/* Brand Header */}
               <div className="flex items-center gap-3">
@@ -178,7 +156,7 @@ export const LoginView: React.FC = () => {
               )}
 
               {/* Authentication Form */}
-              <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4 pb-2">
                 {mode === 'register' && (
                   <div className="space-y-2">
                     <label htmlFor="register-name" className="text-sm font-semibold text-slate-700 dark:text-slate-300">Full name</label>
@@ -266,60 +244,40 @@ export const LoginView: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-3 px-4 bg-[#4779ee] hover:bg-[#3868d8] disabled:opacity-60 text-white font-semibold text-sm rounded-xl shadow-lg shadow-[#5D8FFC]/25 hover:shadow-xl hover:shadow-[#5D8FFC]/30 transition-all flex items-center justify-center gap-2"
+                  className="w-full min-h-11 px-4 bg-[#4779ee] hover:bg-[#3868d8] disabled:opacity-60 text-white font-semibold text-[11px] sm:text-sm leading-none whitespace-nowrap rounded-xl shadow-lg shadow-[#5D8FFC]/25 hover:shadow-xl hover:shadow-[#5D8FFC]/30 transition-all flex items-center justify-center gap-2"
                 >
-                  {isLoading ? 'SIGNING IN...' : mode === 'login' ? 'LOGIN' : mode === 'register' ? 'CREATE ACCOUNT' : mode === 'forgot' ? 'SEND RESET LINK' : 'UPDATE PASSWORD'}
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  <span className="shrink-0">{isLoading ? 'SIGNING IN...' : mode === 'login' ? 'LOGIN' : mode === 'register' ? 'CREATE ACCOUNT' : mode === 'forgot' ? 'SEND RESET LINK' : 'UPDATE PASSWORD'}</span>
+                  <ArrowRight className="w-3.5 h-3.5 shrink-0" />
                 </button>
               </form>
 
+              {mode === 'login' && <p className="text-center text-sm text-slate-500 dark:text-slate-400">New to CollabKanban? <button type="button" onClick={() => { setMode('register'); setError(null); setNotice(null); }} className="font-semibold text-[#4779ee] hover:underline">Create an account</button></p>}
               {(mode === 'forgot' || mode === 'reset') && <p className="text-center text-sm text-slate-500"><button type="button" onClick={() => { setMode('login'); setError(null); setNotice(null); }} className="font-semibold text-[#4779ee] hover:underline">Back to sign in</button></p>}
               {mode === 'register' && <p className="text-center text-sm text-slate-500">Already registered? <button type="button" onClick={() => { setMode('login'); setError(null); }} className="font-semibold text-[#4779ee] hover:underline">Sign in</button></p>}
 
             </div>
 
-            {/* Quick 1-Click Test Personas */}
-            {mode === 'login' && <div className="hidden sm:block pt-3 border-t border-slate-100 dark:border-slate-800">
-              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-3 flex items-center justify-between">
-                <span>Demo accounts · one click sign in</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {demoAccounts.map(account => (
-                  <button
-                    key={account.email}
-                    type="button"
-                    onClick={() => handlePersonaSelect(account)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                      email === account.email
-                        ? 'bg-blue-50/80 border-blue-400 text-blue-600 dark:bg-blue-950/60 dark:border-blue-500 dark:text-blue-300'
-                        : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    {account.name.split(' ')[0]} ({account.role})
-                  </button>
-                ))}
-              </div>
-            </div>}
           </div>
 
           {/* ========================================================
               RIGHT ZONE: Value-Driven Lifestyle / Branding Panel
              ======================================================== */}
-          <div className="relative hidden xl:flex min-h-[600px] bg-slate-900 flex-col justify-between p-8 text-white overflow-hidden">
-            {/* Sign-in illustration */}
-            <div
-              className="absolute inset-0 bg-[#e9edff] bg-contain bg-center bg-no-repeat"
-              style={{ backgroundImage: 'url("/WhatsApp%20Image%202026-11-20%20at%207.18.51%20PM.jpeg")' }}
+          <div className="relative hidden md:flex bg-slate-900 flex-col p-8 text-white rounded-r-2xl sm:rounded-r-3xl">
+            {/* Keep the illustration above the caption so they never cover each other. */}
+            <img
+              src={mode === 'register'
+                ? '/Kanaban%20Baord%20sign%20uPpage.jpg'
+                : '/WhatsApp%20Image%202026-11-20%20at%207.18.51%20PM.jpeg'}
+              alt=""
+              aria-hidden="true"
+              className="relative z-0 w-full flex-1 min-h-0 object-contain"
             />
-
-            {/* Soft Contrast Gradient Overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-900/15 to-transparent" />
 
             {/* Top Branding Pill */}
             
 
             {/* Bottom Value-Driven Carousel Content & Pagination Dots */}
-            <div className="relative z-10 space-y-4">
+            <div className="relative z-10 mt-5 rounded-2xl bg-slate-950/70 p-5 space-y-4">
               <div className="space-y-1.5 transition-all duration-500 min-h-[78px]">
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-bold tracking-widest uppercase text-[#5D8FFC]">

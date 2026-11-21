@@ -7,8 +7,27 @@ import { errorHandler } from './middleware/errorHandler';
 export function createApp(): Application {
   const app = express();
 
-  const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173').split(',').map(origin => origin.trim());
-  app.use(cors({ origin: allowedOrigins, credentials: true }));
+  const allowedOrigins = new Set(
+    (process.env.CLIENT_URL || 'http://localhost:5173')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean)
+      .map(value => {
+        try {
+          return new URL(value).origin;
+        } catch {
+          return value.replace(/\/$/, '');
+        }
+      })
+  );
+  app.use(cors({
+    origin(origin, callback) {
+      // Non-browser clients do not send Origin and are not subject to CORS.
+      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+    credentials: true,
+  }));
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(morgan('dev'));

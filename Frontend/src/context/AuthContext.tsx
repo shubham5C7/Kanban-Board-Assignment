@@ -61,12 +61,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const register = async (name: string, email: string, password: string) => {
     setIsLoading(true);
     try {
-      const data = await api.register({ name, email, password });
-      sessionStorage.removeItem('kanban_token');
-      localStorage.setItem('kanban_token', data.token);
-      setToken(data.token);
-      setUser(data.user);
-      await fetchProfile();
+      await api.register({ name, email, password });
     } finally {
       setIsLoading(false);
     }

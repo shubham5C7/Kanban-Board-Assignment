@@ -89,7 +89,7 @@ export const ActivityFeedModal: React.FC<ActivityFeedModalProps> = ({
 
                 <div className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
                   <span className="px-1.5 py-0.5 rounded text-[9px] font-mono uppercase bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 mr-1.5">
-                    {log.action.replace('_', ' ')}
+                    {log.action === 'BOARD_DELETED' ? 'Board deleted' : log.action.replace('_', ' ')}
                   </span>
                   {log.details?.title && `"${log.details.title}" `}
                   {log.details?.toColumnName && `to ${log.details.toColumnName}`}

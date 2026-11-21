@@ -14,6 +14,7 @@ export interface ITask extends Document {
   position: string;
   version: number;
   deletedAt?: Date | null;
+  deletedBy?: mongoose.Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,6 +37,7 @@ const TaskSchema = new Schema<ITask>(
     position: { type: String, required: true },
     version: { type: Number, default: 1, required: true },
     deletedAt: { type: Date, default: null },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true, optimisticConcurrency: true }
 );

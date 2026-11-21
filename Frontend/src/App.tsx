@@ -25,6 +25,24 @@ import { UndoToast } from './components/UndoToast';
 import { BoardSkeleton } from './components/BoardSkeleton';
 import { AITaskFromTextModal } from './components/AITaskFromTextModal';
 import Confetti from 'react-confetti';
+import { Joyride, type Step, type BeaconRenderProps } from 'react-joyride';
+
+const TOUR_STORAGE_KEY = 'collabkanban_tour_done';
+
+const onboardingSteps: Step[] = [
+  { target: '[data-tour="create-board"]', content: 'Start here: create your first board.', placement: 'right', buttons: ['back', 'skip', 'primary'] },
+  { target: '[data-tour="columns"]', content: 'Columns show your workflow. Drag cards between them.', placement: 'bottom', buttons: ['back', 'skip', 'primary'] },
+  { target: '[data-tour="new-task"]', content: 'Add tasks to any column.', placement: 'bottom', buttons: ['back', 'skip', 'primary'] },
+  { target: '[data-tour="ai-tasks"]', content: 'Generate tasks with AI.', placement: 'bottom', buttons: ['back', 'skip', 'primary'] },
+  { target: '[data-tour="activity-feed"]', content: 'See every change in real time.', placement: 'right', buttons: ['back', 'skip', 'primary'] },
+];
+
+const PulseBeacon: React.FC<BeaconRenderProps> = () => (
+  <span className="relative flex h-5 w-5 items-center justify-center">
+    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-60" />
+    <span className="relative inline-flex h-3 w-3 rounded-full border-2 border-white bg-blue-600 shadow" />
+  </span>
+);
 
 function taskSnapshot(task: Task): TaskSnapshot {
   const assignee = task.assigneeId;
@@ -77,6 +95,8 @@ export const App: React.FC = () => {
   const [createBoardOpen, setCreateBoardOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [aiTaskFromTextOpen, setAiTaskFromTextOpen] = useState(false);
+  const [tourRun, setTourRun] = useState(false);
+  const [tourSteps, setTourSteps] = useState<Step[]>([]);
 
   // Offline queue for mutations
   const [offlineQueue, setOfflineQueue] = useState<any[]>([]);
@@ -96,6 +116,29 @@ export const App: React.FC = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  const startTour = () => {
+    window.setTimeout(() => {
+      const availableSteps = onboardingSteps.filter(step =>
+        typeof step.target === 'string' && document.querySelector(step.target)
+      );
+      setTourSteps(availableSteps);
+      setTourRun(availableSteps.length > 0);
+    }, 300);
+  };
+
+  useEffect(() => {
+    if (!user || localStorage.getItem(TOUR_STORAGE_KEY)) return;
+    const timer = window.setTimeout(startTour, 700);
+    return () => window.clearTimeout(timer);
+  }, [user?.id]);
+
+  const handleTourEvent = ({ status }: { status: string }) => {
+    if (status === 'finished' || status === 'skipped') {
+      localStorage.setItem(TOUR_STORAGE_KEY, 'true');
+      setTourRun(false);
+    }
+  };
 
   useEffect(() => {
     setUndoAction(null);
@@ -125,6 +168,17 @@ export const App: React.FC = () => {
       setBoardLoading(true);
       try {
         const data = await api.getBoard(currentTenant._id, currentBoard._id);
+        // Older or manually emptied boards may have no columns. Restore the
+        // standard workflow so task creation always has valid destinations.
+        if ((data.columns || []).length === 0) {
+          const standardColumns = ['Backlog', 'In Progress', 'In Review', 'Completed'];
+          const createdColumns = [];
+          for (const name of standardColumns) {
+            const result = await api.createColumn(currentTenant._id, currentBoard._id, { name });
+            createdColumns.push(result.column);
+          }
+          data.columns = createdColumns;
+        }
         const seenColIds = new Set<string>();
         const seenColNames = new Set<string>();
         const uniqueLoadedColumns = (data.columns || []).filter(c => {
@@ -677,10 +731,33 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden font-sans">
+      <Joyride
+        run={tourRun}
+        steps={tourSteps}
+        continuous
+        scrollToFirstStep
+        onEvent={handleTourEvent}
+        beaconComponent={PulseBeacon}
+        locale={{ back: 'Back', next: 'Next', skip: 'Skip', last: 'Done' }}
+        options={{
+          primaryColor: '#2563eb',
+          backgroundColor: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          textColor: document.documentElement.classList.contains('dark') ? '#e2e8f0' : '#0f172a',
+          overlayColor: 'rgba(15, 23, 42, 0.68)',
+          showProgress: true,
+          zIndex: 10000,
+        }}
+        styles={{
+          tooltip: { borderRadius: 16, padding: 18 },
+          tooltipTitle: { color: '#2563eb', fontWeight: 700 },
+          buttonPrimary: { backgroundColor: '#2563eb', borderRadius: 8, color: '#ffffff' },
+        }}
+      />
       {/* 1. Left Sidebar */}
       <Sidebar
         onOpenActivity={() => setActivityOpen(true)}
         onOpenNewBoard={() => setCreateBoardOpen(true)}
+        onReplayTour={startTour}
         mobileOpen={mobileSidebarOpen}
         onCloseMobile={() => setMobileSidebarOpen(false)}
       />

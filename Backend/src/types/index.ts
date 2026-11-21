@@ -39,7 +39,8 @@ export type ActivityAction =
   | 'COLUMN_MOVED'
   | 'COLUMN_DELETED'
   | 'BOARD_CREATED'
-  | 'BOARD_UPDATED';
+  | 'BOARD_UPDATED'
+  | 'BOARD_DELETED';
 
 export interface PresenceUser {
   userId: string;

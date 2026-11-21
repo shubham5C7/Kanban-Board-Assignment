@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Column, User, TaskPriority } from '../types';
-import { X, Plus } from 'lucide-react';
+import { X, ChevronDown } from 'lucide-react';
+
+const preferredColumnOrder = ['Backlog', 'In Progress', 'In Review', 'Completed'];
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -26,10 +28,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   onClose,
   onSubmit,
 }) => {
-  if (!isOpen) return null;
-
   const [title, setTitle] = useState('');
   const [titleError, setTitleError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [description, setDescription] = useState('');
   const [columnId, setColumnId] = useState(defaultColumnId || columns[0]?._id || '');
   const [priority, setPriority] = useState<TaskPriority>('MEDIUM');
@@ -38,6 +39,17 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    if (defaultColumnId && columns.some(column => column._id === defaultColumnId)) {
+      setColumnId(defaultColumnId);
+      return;
+    }
+    setColumnId(current => columns.some(column => column._id === current)
+      ? current
+      : columns[0]?._id || '');
+  }, [isOpen, defaultColumnId, columns]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) {
@@ -45,6 +57,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       return;
     }
     if (!columnId) {
+      setFormError(columns.length
+        ? 'Choose a column before creating the task.'
+        : 'No columns are available. Select a board with columns first.');
       return;
     }
     if (submittingRef.current || isSubmitting) return;
@@ -52,6 +67,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     submittingRef.current = true;
     setIsSubmitting(true);
     setTitleError(null);
+    setFormError(null);
     try {
       const parsedLabels = labels
         .split(',')
@@ -77,14 +93,18 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       setDescription('');
       setLabels('');
       setAssigneeId('');
+      setFormError(null);
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('[CreateTaskModal] Error creating task', err);
+      setFormError(err?.message || 'Could not create the task. Please try again.');
     } finally {
       submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -110,6 +130,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+          {formError && <p role="alert" className="text-rose-500 font-medium">{formError}</p>}
           <div>
             <label className="font-medium text-slate-700 dark:text-slate-300 block mb-1">
               Title *
@@ -140,17 +161,34 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               <label className="font-medium text-slate-700 dark:text-slate-300 block mb-1">
                 Column
               </label>
-              <select
-                value={columnId}
-                onChange={e => setColumnId(e.target.value)}
-                className="w-full px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md focus:outline-none"
-              >
-                {columns.map(c => (
-                  <option key={c._id} value={c._id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  value={columnId}
+                  onChange={e => {
+                    setColumnId(e.target.value);
+                    setFormError(null);
+                  }}
+                  aria-label="Task column"
+                  className="w-full appearance-none cursor-pointer px-2 py-1.5 pr-8 text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                >
+                  {columns.length === 0 && <option value="" disabled>No columns available</option>}
+                  {[...columns]
+                    .sort((a, b) => {
+                      const aIndex = preferredColumnOrder.indexOf(a.name);
+                      const bIndex = preferredColumnOrder.indexOf(b.name);
+                      if (aIndex === -1 && bIndex === -1) return 0;
+                      if (aIndex === -1) return 1;
+                      if (bIndex === -1) return -1;
+                      return aIndex - bIndex;
+                    })
+                    .map(c => (
+                    <option key={c._id} value={c._id} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+                      {c.name}
+                    </option>
+                    ))}
+                </select>
+                <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              </div>
             </div>
 
             <div>
@@ -227,7 +265,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || !title.trim()}
+              disabled={isSubmitting || !title.trim() || !columnId}
               className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-md shadow-sm transition-colors"
             >
               {isSubmitting ? 'Creating...' : 'Create Task'}

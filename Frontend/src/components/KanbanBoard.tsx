@@ -276,7 +276,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden p-3 sm:p-5 flex gap-3 sm:gap-4 items-stretch select-none snap-x snap-proximity">
+      <div data-tour="columns" className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden p-3 sm:p-5 flex gap-3 sm:gap-4 items-stretch select-none snap-x snap-proximity">
         {uniqueColumns.map(column => (
           <Column
             key={column._id}

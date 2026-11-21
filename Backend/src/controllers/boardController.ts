@@ -23,7 +23,7 @@ const UpdateBoardSchema = z.object({
 
 export async function getBoards(req: AuthenticatedRequest, res: Response): Promise<void> {
   const tenantId = req.tenantId!;
-  const boards = await Board.find({ tenantId: new mongoose.Types.ObjectId(tenantId) })
+  const boards = await Board.find({ tenantId: new mongoose.Types.ObjectId(tenantId), deletedAt: null })
     .sort({ createdAt: -1 })
     .populate('createdBy', 'name email avatarUrl');
 
@@ -43,6 +43,7 @@ export async function getBoard(req: AuthenticatedRequest, res: Response): Promis
   const board = await Board.findOne({
     _id: new mongoose.Types.ObjectId(boardId),
     tenantId: new mongoose.Types.ObjectId(tenantId),
+    deletedAt: null,
   }).populate('createdBy', 'name email avatarUrl');
 
   if (!board) {
@@ -54,6 +55,7 @@ export async function getBoard(req: AuthenticatedRequest, res: Response): Promis
   const columns = await Column.find({
     tenantId: new mongoose.Types.ObjectId(tenantId),
     boardId: board._id,
+    deletedAt: null,
   }).sort({ position: 1 });
 
   // Fetch all active tasks (deletedAt is null)
@@ -93,10 +95,10 @@ export async function createBoard(req: AuthenticatedRequest, res: Response): Pro
 
   // Create default starter columns with fractional indices
   const defaultCols = [
-    { name: 'To Do', color: '#64748b' },
-    { name: 'In Progress', color: '#3b82f6' },
-    { name: 'Review', color: '#f59e0b' },
-    { name: 'Done', color: '#10b981' },
+    { name: 'Backlog', color: '#64748c' },
+    { name: 'In Progress', color: '#64748c' },
+    { name: 'In Review', color: '#64748c' },
+    { name: 'Completed', color: '#64748c' },
   ];
 
   let prevPos: string | null = null;
@@ -148,6 +150,7 @@ export async function updateBoard(req: AuthenticatedRequest, res: Response): Pro
   const board = await Board.findOne({
     _id: new mongoose.Types.ObjectId(boardId),
     tenantId: new mongoose.Types.ObjectId(tenantId),
+    deletedAt: null,
   });
 
   if (!board) {
@@ -183,12 +186,16 @@ export async function updateBoard(req: AuthenticatedRequest, res: Response): Pro
 export async function deleteBoard(req: AuthenticatedRequest, res: Response): Promise<void> {
   const tenantId = req.tenantId!;
   const { boardId } = req.params;
+  if (!mongoose.isValidObjectId(boardId)) {
+    res.status(404).json({ code: 'board_not_found', message: 'Board not found' });
+    return;
+  }
   const boardObjectId = new mongoose.Types.ObjectId(boardId);
   const tenantObjectId = new mongoose.Types.ObjectId(tenantId);
-
-  const board = await Board.findOneAndDelete({
+  const board = await Board.findOne({
     _id: boardObjectId,
     tenantId: tenantObjectId,
+    deletedAt: null,
   });
 
   if (!board) {
@@ -196,14 +203,47 @@ export async function deleteBoard(req: AuthenticatedRequest, res: Response): Pro
     return;
   }
 
-  await Column.deleteMany({ boardId: boardObjectId, tenantId: tenantObjectId });
-  await Task.deleteMany({ boardId: boardObjectId, tenantId: tenantObjectId });
+  const isAdmin = req.membership?.role === 'ORG_ADMIN' || req.membership?.role === 'TENANT_ADMIN';
+  if (!isAdmin && board.createdBy.toString() !== req.user!.id) {
+    res.status(403).json({
+      code: 'forbidden',
+      message: 'Only the board creator or an admin can delete this board.',
+    });
+    return;
+  }
+
+  const deletedAt = new Date();
+  const deletedBy = new mongoose.Types.ObjectId(req.user!.id);
+  board.deletedAt = deletedAt;
+  board.deletedBy = deletedBy;
+  await board.save();
+
+  await Column.updateMany(
+    { boardId: boardObjectId, tenantId: tenantObjectId, deletedAt: null },
+    { $set: { deletedAt, deletedBy } }
+  );
+  await Task.updateMany(
+    { boardId: boardObjectId, tenantId: tenantObjectId, deletedAt: null },
+    { $set: { deletedAt, deletedBy } }
+  );
+
+  await ActivityLog.create({
+    tenantId: tenantObjectId,
+    boardId: boardObjectId,
+    actorId: deletedBy,
+    actorName: req.user!.name,
+    actorEmail: req.user!.email,
+    entityType: 'BOARD',
+    entityId: boardObjectId.toString(),
+    action: 'BOARD_DELETED',
+    details: { name: board.name, message: 'Board deleted' },
+  });
 
   await recordTenantEvent(
     tenantId,
     'board.deleted',
     { id: req.user!.id, name: req.user!.name },
-    { boardId }
+    { boardId, board: { _id: boardId, name: board.name } }
   );
 
   res.json({ message: 'Board deleted successfully' });

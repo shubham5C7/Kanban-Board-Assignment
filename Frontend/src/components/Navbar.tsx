@@ -88,6 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         {onOpenAITaskFromText && (
           <button
             onClick={onOpenAITaskFromText}
+            data-tour="ai-tasks"
             title="Generate tasks from meeting notes with AI"
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-900/50 text-xs font-medium transition-colors shadow-sm shrink-0"
             aria-label="AI Generate Tasks"
@@ -98,12 +99,15 @@ export const Navbar: React.FC<NavbarProps> = ({
         )}
 
         {/* New Task Button */}
-        <button
-          onClick={onOpenCreateTask}
-          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium shadow-sm transition-colors shrink-0"
-        >
-          <span className="hidden sm:inline">New Task</span>
-        </button>
+        {boardName !== 'No Board Selected' && (
+          <button
+            onClick={onOpenCreateTask}
+            data-tour="new-task"
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium shadow-sm transition-colors shrink-0"
+          >
+            <span className="hidden sm:inline">New Task</span>
+          </button>
+        )}
       </div>
     </header>
   );

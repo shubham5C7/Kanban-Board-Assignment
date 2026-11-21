@@ -6,6 +6,8 @@ export interface IBoard extends Document {
   description?: string;
   version: number;
   createdBy: mongoose.Types.ObjectId;
+  deletedAt?: Date | null;
+  deletedBy?: mongoose.Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -17,6 +19,8 @@ const BoardSchema = new Schema<IBoard>(
     description: { type: String, default: '' },
     version: { type: Number, default: 1, required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    deletedAt: { type: Date, default: null, index: true },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true, optimisticConcurrency: true }
 );

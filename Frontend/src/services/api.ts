@@ -108,6 +108,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  deleteBoard: (tenantId: string, boardId: string) =>
+    request<{ message: string }>(`/tenants/${tenantId}/boards/${boardId}`, {
+      method: 'DELETE',
+    }),
 
   // Columns
   createColumn: (tenantId: string, boardId: string, payload: { name: string; color?: string }) =>

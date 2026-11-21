@@ -13,9 +13,18 @@ let io: SocketIOServer | null = null;
 const activeSockets = new Map<string, PresenceUser>();
 
 export function initSocketIO(server: HttpServer, clientUrl: string): SocketIOServer {
+  const allowedOrigins = clientUrl.split(',').map(value => {
+    const trimmed = value.trim();
+    try {
+      return new URL(trimmed).origin;
+    } catch {
+      return trimmed.replace(/\/$/, '');
+    }
+  }).filter(Boolean);
+
   io = new SocketIOServer(server, {
     cors: {
-      origin: (clientUrl || 'http://localhost:5173').split(',').map(origin => origin.trim()),
+      origin: allowedOrigins.length ? allowedOrigins : ['http://localhost:5173'],
       methods: ['GET', 'POST', 'PATCH', 'DELETE'],
       credentials: true,
     },

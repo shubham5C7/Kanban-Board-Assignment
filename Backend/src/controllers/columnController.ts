@@ -35,14 +35,14 @@ export async function createColumn(req: AuthenticatedRequest, res: Response): Pr
   const tenantObjectId = new mongoose.Types.ObjectId(tenantId);
   const boardObjectId = new mongoose.Types.ObjectId(boardId);
 
-  const board = await Board.findOne({ _id: boardObjectId, tenantId: tenantObjectId });
+  const board = await Board.findOne({ _id: boardObjectId, tenantId: tenantObjectId, deletedAt: null });
   if (!board) {
     res.status(404).json({ code: 'board_not_found', message: 'Board not found in this tenant' });
     return;
   }
 
   // Find last column to calculate position
-  const lastCol = await Column.findOne({ tenantId: tenantObjectId, boardId: boardObjectId })
+  const lastCol = await Column.findOne({ tenantId: tenantObjectId, boardId: boardObjectId, deletedAt: null })
     .sort({ position: -1 })
     .lean();
 
@@ -87,6 +87,7 @@ export async function updateColumn(req: AuthenticatedRequest, res: Response): Pr
   const column = await Column.findOne({
     _id: new mongoose.Types.ObjectId(columnId),
     tenantId: new mongoose.Types.ObjectId(tenantId),
+    deletedAt: null,
   });
 
   if (!column) {
@@ -127,6 +128,7 @@ export async function moveColumn(req: AuthenticatedRequest, res: Response): Prom
   const column = await Column.findOne({
     _id: new mongoose.Types.ObjectId(columnId),
     tenantId: new mongoose.Types.ObjectId(tenantId),
+    deletedAt: null,
   });
 
   if (!column) {
@@ -167,6 +169,7 @@ export async function deleteColumn(req: AuthenticatedRequest, res: Response): Pr
   const column = await Column.findOneAndDelete({
     _id: columnObjectId,
     tenantId: tenantObjectId,
+    deletedAt: null,
   });
 
   if (!column) {
@@ -176,8 +179,8 @@ export async function deleteColumn(req: AuthenticatedRequest, res: Response): Pr
 
   // Soft-delete or mark tasks in this column as deleted
   await Task.updateMany(
-    { columnId: columnObjectId, tenantId: tenantObjectId },
-    { $set: { deletedAt: new Date() } }
+    { columnId: columnObjectId, tenantId: tenantObjectId, deletedAt: null },
+    { $set: { deletedAt: new Date(), deletedBy: new mongoose.Types.ObjectId(req.user!.id) } }
   );
 
   await ActivityLog.create({

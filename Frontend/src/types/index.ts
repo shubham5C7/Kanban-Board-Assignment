@@ -38,7 +38,9 @@ export interface Board {
   name: string;
   description?: string;
   version: number;
-  createdBy: User;
+  createdBy: User | string;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -51,6 +53,8 @@ export interface Column {
   position: string;
   version: number;
   color?: string;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -69,6 +73,7 @@ export interface Task {
   version: number;
   assigneeId?: User | null;
   deletedAt?: string | null;
+  deletedBy?: string | null;
   createdAt: string;
   updatedAt: string;
 }

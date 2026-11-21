@@ -55,7 +55,7 @@ router.get('/:tenantId/boards', getBoards);
 router.post('/:tenantId/boards', requireTenantAdmin, createBoard);
 router.get('/:tenantId/boards/:boardId', getBoard);
 router.patch('/:tenantId/boards/:boardId', requireTenantAdmin, updateBoard);
-router.delete('/:tenantId/boards/:boardId', requireTenantAdmin, deleteBoard);
+router.delete('/:tenantId/boards/:boardId', requireMember, deleteBoard);
 
 // Columns
 router.post('/:tenantId/boards/:boardId/columns', requireTenantAdmin, createColumn);

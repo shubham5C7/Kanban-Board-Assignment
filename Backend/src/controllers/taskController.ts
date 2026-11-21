@@ -65,8 +65,11 @@ export async function createTask(req: AuthenticatedRequest, res: Response): Prom
   const columnObjectId = new mongoose.Types.ObjectId(columnId);
 
   // Validate column belongs to tenant
-  const column = await Column.findOne({ _id: columnObjectId, tenantId: tenantObjectId });
-  if (!column) {
+  const column = await Column.findOne({ _id: columnObjectId, tenantId: tenantObjectId, deletedAt: null });
+  const board = column
+    ? await Board.findOne({ _id: column.boardId, tenantId: tenantObjectId, deletedAt: null })
+    : null;
+  if (!column || !board) {
     res.status(404).json({ code: 'column_not_found', message: 'Target column not found in this tenant' });
     return;
   }
@@ -102,7 +105,7 @@ export async function createTask(req: AuthenticatedRequest, res: Response): Prom
     deletedAt: null,
   });
 
-  const populatedTask = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
+  const populatedTask = await Task.findOne({ _id: task._id, tenantId: tenantObjectId, deletedAt: null }).populate('assigneeId', 'name email avatarUrl');
 
   // Activity log
   await ActivityLog.create({
@@ -216,7 +219,7 @@ export async function updateTask(req: AuthenticatedRequest, res: Response): Prom
     throw err;
   }
 
-  const updatedTask = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
+  const updatedTask = await Task.findOne({ _id: task._id, tenantId: tenantObjectId, deletedAt: null }).populate('assigneeId', 'name email avatarUrl');
 
   await ActivityLog.create({
     tenantId: tenantObjectId,
@@ -268,6 +271,7 @@ export async function moveTask(req: AuthenticatedRequest, res: Response): Promis
   const targetColumn = await Column.findOne({
     _id: targetColumnObjectId,
     tenantId: tenantObjectId,
+    deletedAt: null,
   });
 
   if (!targetColumn) {
@@ -336,7 +340,7 @@ export async function moveTask(req: AuthenticatedRequest, res: Response): Promis
     throw err;
   }
 
-  const updatedTask = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
+  const updatedTask = await Task.findOne({ _id: task._id, tenantId: tenantObjectId, deletedAt: null }).populate('assigneeId', 'name email avatarUrl');
 
   await ActivityLog.create({
     tenantId: tenantObjectId,
@@ -410,6 +414,7 @@ export async function deleteTask(req: AuthenticatedRequest, res: Response): Prom
 
   // Soft delete
   task.deletedAt = new Date();
+  task.deletedBy = new mongoose.Types.ObjectId(user.id);
   task.version += 1;
   await task.save();
 
@@ -453,6 +458,16 @@ export async function undoTask(req: AuthenticatedRequest, res: Response): Promis
     return;
   }
 
+  const activeBoard = await Board.findOne({
+    _id: task.boardId,
+    tenantId: tenantObjectId,
+    deletedAt: null,
+  });
+  if (!activeBoard) {
+    res.status(404).json({ code: 'task_not_found', message: 'Task not found' });
+    return;
+  }
+
   // If another teammate has modified the card in the meantime, reject undo!
   // PRD Edge case: "Undo of a change someone else has since edited is rejected with a notice"
   if (task.version !== data.expectedVersion) {
@@ -471,6 +486,7 @@ export async function undoTask(req: AuthenticatedRequest, res: Response): Promis
       _id: data.previousState.columnId,
       tenantId: tenantObjectId,
       boardId: task.boardId,
+      deletedAt: null,
     });
     if (!restoreColumn) {
       res.status(409).json({ code: 'column_deleted', message: 'The original column is no longer available.' });
@@ -506,6 +522,7 @@ export async function undoTask(req: AuthenticatedRequest, res: Response): Promis
   }
   if (data.previousState.deletedAt !== undefined) {
     task.deletedAt = data.previousState.deletedAt ? new Date(data.previousState.deletedAt) : null;
+    task.deletedBy = task.deletedAt ? task.deletedBy : null;
   }
 
   task.version += 1;
@@ -521,7 +538,7 @@ export async function undoTask(req: AuthenticatedRequest, res: Response): Promis
     throw err;
   }
 
-  const updatedTask = await Task.findById(task._id).populate('assigneeId', 'name email avatarUrl');
+  const updatedTask = await Task.findOne({ _id: task._id, tenantId: tenantObjectId, deletedAt: null }).populate('assigneeId', 'name email avatarUrl');
 
   await ActivityLog.create({
     tenantId: tenantObjectId,
