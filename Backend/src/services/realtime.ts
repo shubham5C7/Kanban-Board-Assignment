@@ -6,6 +6,12 @@ import { Membership } from '../models/Membership';
 import { Tenant } from '../models/Tenant';
 import { TenantEvent } from '../models/TenantEvent';
 import { AuthUser, PresenceUser } from '../types';
+import {
+  createCorsOrigin,
+  CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
+  CORS_METHODS,
+} from './cors';
 
 let io: SocketIOServer | null = null;
 
@@ -13,19 +19,12 @@ let io: SocketIOServer | null = null;
 const activeSockets = new Map<string, PresenceUser>();
 
 export function initSocketIO(server: HttpServer, clientUrl: string): SocketIOServer {
-  const allowedOrigins = clientUrl.split(',').map(value => {
-    const trimmed = value.trim();
-    try {
-      return new URL(trimmed).origin;
-    } catch {
-      return trimmed.replace(/\/$/, '');
-    }
-  }).filter(Boolean);
-
   io = new SocketIOServer(server, {
     cors: {
-      origin: allowedOrigins.length ? allowedOrigins : ['http://localhost:5173'],
-      methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+      origin: createCorsOrigin(clientUrl),
+      methods: CORS_METHODS,
+      allowedHeaders: CORS_ALLOWED_HEADERS,
+      exposedHeaders: CORS_EXPOSED_HEADERS,
       credentials: true,
     },
     pingInterval: 10000,
